@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Xzavior Chess - Game</title>
+  <link href="css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f7f7f7;
+      text-align: center;
+      padding: 20px;
+    }
+    #chessboard {
+      display: grid;
+      /* Ensure all boxes are the same size and fit within the frame */
+      grid-template-columns: repeat(8, 1fr);
+      width: 100%;
+      max-width: 95vmin; /* Use vmin to ensure it fits well on various screen sizes */
+      aspect-ratio: 1 / 1; /* Keep squares perfectly square */
+      margin: 0 auto;
+      border: 2px solid #333;
+      box-sizing: border-box; /* Include padding and border in the element's total width and height */
+    }
+    .square {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: calc(6vmin); /* Adjust font size relative to viewport */
+      user-select: none;
+      transition: all 0.2s ease;
+      box-sizing: border-box; /* Crucial for consistent sizing */
+      position: relative; /* For absolutely positioning pieces */
+    }
+    .white { background: #f0d9b5; }
+    .black { background: #b58863; }
+    .selected { outline: 3px solid yellow; }
+    .highlight { background-color: rgba(0, 255, 0, 0.4) !important; }
+
+    /* Styles for movable pieces */
+    .piece {
+      cursor: grab;
+      position: absolute; /* Allows positioning relative to the square */
+      width: 100%; /* Make piece fill the square */
+      height: 100%; /* Make piece fill the square */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 6vmin; /* Size for the piece symbol */
+      z-index: 10; /* Ensure pieces are above squares */
+      /* Smooth transition for piece movement (optional) */
+      transition: top 0.2s ease-out, left 0.2s ease-out;
+    }
+    .dragging {
+        opacity: 0.7; /* Make the dragged piece slightly transparent */
+        cursor: grabbing;
+    }
+
+    #status { margin-top: 10px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <h2 class="mb-3">Xzavior Chess</h2>
+  <div id="chessboard"></div>
+  <div id="status">Loading...</div>
+  <div class="mt-3">
+    <button class="btn btn-warning" onclick="undoMove()">Undo Move</button>
+    <button class="btn btn-secondary" onclick="saveGame()">Save Game</button>
+    <button class="btn btn-danger" onclick="restartGame()">Restart</button>
+  </div>
+
+  <script src="js/chess.min.js"></script>
+  <script>
+    const config = JSON.parse(localStorage.getItem("xzaviorGameSettings") || '{}');
+    const game = new Chess(); // Your custom Chess object
+    const boardElement = document.getElementById("chessboard"); // Renamed to avoid conflict
+    const statusElement = document.getElementById("status"); // Renamed to avoid conflict
+
+    let selected = null; // Stores the 0x88 index of the selected square
+    let lastMoveTime = 0;
+    let currentDragPiece = null; // To store the piece being dragged
+    let currentDragSquare = null; // To store the square the drag started from (algebraic string)
+
+    let playerColor = config.side || "white";
+    let gameMode = config.mode || "human";
+    let difficulty = parseInt(config.difficulty || 1);
+
+    // Utility to convert 0x88 square index to algebraic notation (e.g., 'a1')
+    function algebraic(square) {
+        const file = (square % 16);
+        const rank = Math.floor(square / 16);
+        return String.fromCharCode('a'.charCodeAt(0) + file) + (8 - rank);
+    }
+
+    // Utility to convert algebraic notation to 0x88 square index
+    function toSquare(alg) {
+        if (alg.length !== 2) return -1;
+        const file = alg.charCodeAt(0) - 'a'.charCodeAt(0);
+        const rank = 8 - parseInt(alg[1], 10);
+        return (rank * 16) + file;
+    }
+
+    // Constants for piece flags from your engine's BITS (needed for move generation/evaluation)
+    // Make sure BITS is available in the global scope if your engine doesn't export it,
+    // or redefine it here if necessary. Since your engine's main Chess function is global,
+    // we'll assume BITS might also be needed here. If your engine is fully self-contained
+    // and doesn't expose BITS globally, you might need to copy the BITS constant from Part 1 here.
+    // For now, let's assume it's global or your engine effectively exposes it.
+    // If you encounter 'BITS is not defined', uncomment the BITS definition from Part 1 here.
+    /*
+    const BITS = {
+        NORMAL: 1, CAPTURE: 2, BIG_PAWN: 4, EP_CAPTURE: 8, PROMOTION: 16,
+        KSIDE_CASTLE: 32, QSIDE_CASTLE: 64
+    };
+    */
+
+
+    function pieceToChar(piece) {
+      const symbols = {
+        p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
+        P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔"
+      };
+      return symbols[piece] || piece;
+    }
+
+    function renderBoard() {
+      boardElement.innerHTML = ""; // Clear existing board
+      const currentBoardState = game.board(); // Get the 2D board array from your engine
+
+      currentBoardState.forEach((row, rIdx) => {
+        row.forEach((piece, cIdx) => {
+          const square = document.createElement("div");
+          const file = String.fromCharCode('a'.charCodeAt(0) + cIdx);
+          const rank = 8 - rIdx;
+          const id = `${file}${rank}`; // Algebraic ID for the HTML element
+          const square0x88 = (rIdx * 16) + cIdx; // Calculate 0x88 index
+
+          square.id = id;
+          square.className = `square ${(rIdx + cIdx) % 2 === 0 ? "white" : "black"}`;
+          square.dataset.square0x88 = square0x88; // Store 0x88 index for easy lookup
+
+          if (piece) {
+            const pieceDiv = document.createElement("div");
+            pieceDiv.className = 'piece';
+            pieceDiv.textContent = pieceToChar(piece.color === 'w' ? piece.type.toUpperCase() : piece.type);
+            pieceDiv.dataset.pieceType = piece.type;
+            pieceDiv.dataset.pieceColor = piece.color;
+            pieceDiv.dataset.fromSquare = id; // Store original square for drag
+
+            // Only allow dragging your pieces in player vs computer or any piece in human vs human
+            if (gameMode === "human" || piece.color === playerColor.charAt(0)) {
+                pieceDiv.draggable = true;
+                pieceDiv.addEventListener('dragstart', (e) => onDragStart(e, id, pieceDiv));
+            }
+            square.appendChild(pieceDiv);
+          }
+
+          // Add drop events to all squares
+          square.addEventListener('dragover', onDragOver);
+          square.addEventListener('drop', (e) => onDrop(e, id));
+          // Add click event for standard click-to-move
+          square.addEventListener('click', () => onClickSquare(id));
+        });
+      });
+      updateStatus();
+    }
+
+    function onDragStart(event, squareId, pieceDiv) {
+        currentDragPiece = pieceDiv;
+        currentDragSquare = squareId;
+        event.dataTransfer.setData('text/plain', squareId); // Set data for drop
+        event.dataTransfer.effectAllowed = 'move';
+        // Add a class to the piece being dragged for visual feedback
+        setTimeout(() => pieceDiv.classList.add('dragging'), 0);
+    }
+
+    function onDragOver(event) {
+        event.preventDefault(); // Allow dropping
+        event.dataTransfer.dropEffect = 'move';
+    }
+
+    function onDrop(event, targetSquareId) {
+        event.preventDefault();
+
+        // Check if currentDragPiece is null, means drag started outside or was not a valid piece
+        if (!currentDragPiece) {
+            renderBoard(); // Re-render to clear any unintended highlights
+            return;
+        }
+
+        currentDragPiece.classList.remove('dragging'); // Remove dragging class
+
+        const fromSquareId = event.dataTransfer.getData('text/plain');
+
+        if (fromSquareId === targetSquareId) {
+            // Dropped on the same square, treat as a click to select/deselect
+            onClickSquare(fromSquareId);
+            currentDragPiece = null;
+            currentDragSquare = null;
+            return;
+        }
+
+        const from0x88 = toSquare(fromSquareId);
+        const to0x88 = toSquare(targetSquareId);
+
+        // Attempt to make the move
+        // Note: For promotion, this defaults to 'q'. A full UI would ask for promotion type.
+        const moveResult = game.move({ from: from0x88, to: to0x88, promotion: 'q' });
+
+        if (moveResult) {
+            // Move was successful
+            renderBoard();
+            if (gameMode === "computer") {
+                setTimeout(makeComputerMove, 400);
+            }
+        } else {
+            // Invalid move, re-render to reset piece position visually
+            renderBoard();
+            // Optional: Provide feedback for invalid move (e.g., flash red border on target square)
+        }
+        currentDragPiece = null;
+        currentDragSquare = null;
+    }
+
+
+    function onClickSquare(squareAlg) {
+      if (game.gameOver()) return;
+
+      const square0x88 = toSquare(squareAlg);
+      const pieceOnSquare = game.get(square0x88);
+
+      if (selected !== null) { // A piece is already selected
+        // Try to make a move to the clicked square
+        const moveObj = {
+            from: selected,
+            to: square0x88,
+            promotion: 'q' // Default to queen promotion
+        };
+        const moveResult = game.move(moveObj);
+
+        if (moveResult) {
+          // Move was successful
+          selected = null;
+          renderBoard();
+          if (gameMode === "computer") {
+            setTimeout(makeComputerMove, 400);
+          }
+        } else {
+          // Invalid move or clicked on own piece:
+          // Check if the newly clicked square has a piece of the current player's color
+          if (pieceOnSquare && pieceOnSquare.color === game.turn() && square0x88 !== selected) {
+            // Clicked on a different piece of the current player's color, select it
+            selected = square0x88;
+            highlightMoves(square0x88);
+          } else {
+            // Invalid move or clicked on the same selected piece again, deselect
+            selected = null;
+            renderBoard();
+          }
+        }
+      } else { // No piece is selected, try to select one
+        // Only allow selecting pieces of the current player's turn
+        if (pieceOnSquare && pieceOnSquare.color === game.turn()) {
+          selected = square0x88;
+          highlightMoves(square0x88);
+        }
+      }
+    }
+
+    function highlightMoves(square0x88) {
+      renderBoard(); // Clear previous highlights and selection
+      // Get moves in verbose format to access 'to' square
+      const moves = game.moves({ square: square0x88, verbose: true });
+      
+      document.getElementById(algebraic(square0x88)).classList.add("selected");
+      moves.forEach(m => {
+        const target = document.getElementById(algebraic(m.to));
+        if (target) target.classList.add("highlight");
+      });
+    }
+
+    function updateStatus() {
+      if (game.inCheckmate()) {
+        statusElement.textContent = `Checkmate! ${game.turn() === "w" ? "Black" : "White"} wins.`;
+      } else if (game.inCheck()) {
+        statusElement.textContent = `${game.turn() === "w" ? "White" : "Black"} is in check.`;
+      } else if (game.inDraw()) {
+        statusElement.textContent = "Draw!";
+      } else {
+        statusElement.textContent = `${game.turn() === "w" ? "White" : "Black"}'s turn.`;
+      }
+    }
+
+    function undoMove() {
+      const now = Date.now();
+      if (now - lastMoveTime < 1000) return; // Debounce
+      
+      game.undo(); 
+      if (gameMode === "computer") {
+        game.undo(); // Undo computer's move too
+      }
+      renderBoard();
+      lastMoveTime = now;
+    }
+
+    function saveGame() {
+      localStorage.setItem("xzaviorSavedGame", game.fen());
+      alert("Game saved!");
+    }
+
+    function restartGame() {
+      if (confirm("Restart the game?")) {
+        game.reset(); // Your custom engine's reset method
+        renderBoard();
+      }
+    }
+
+    function makeComputerMove() {
+      if (game.gameOver()) return;
+
+      const moves = game.moves(); // Get legal moves from your engine
+      let moveObj;
+
+      if (moves.length === 0) {
+        // No legal moves, game is over (stalemate/checkmate)
+        renderBoard(); // Re-render to update status
+        return;
+      }
+
+      if (difficulty === 1) {
+        // Difficulty 1: Random move
+        moveObj = moves[Math.floor(Math.random() * moves.length)];
+      } else {
+        // Difficulty 2: Simple capture priority (using your findBestMove logic)
+        moveObj = findBestMoveForComputer();
+      }
+      
+      if (moveObj) { // Ensure a move was found
+          game.move(moveObj); // Execute move using your engine's move method
+          renderBoard();
+      }
+    }
+
+    // Adapts findBestMove from your engine for use with game.moves()
+    function findBestMoveForComputer() {
+        const moves = game.moves({ verbose: true }); // Get verbose moves from your engine
+        if (moves.length === 0) return null; // No moves available
+
+        // Prioritize any capturing move
+        // Assuming BITS constant from your engine is globally available or defined above.
+        const capturingMoves = moves.filter(m => (m.flags & BITS.CAPTURE) || (m.flags & BITS.EP_CAPTURE));
+        if (capturingMoves.length > 0) {
+            // If there are capturing moves, pick one randomly
+            return capturingMoves[Math.floor(Math.random() * capturingMoves.length)];
+        }
+
+        // If no capturing moves, make a random move
+        return moves[Math.floor(Math.random() * moves.length)];
+    }
+
+
+    // --- Initialization ---
+    // Make sure BITS constant is available before this if findBestMoveForComputer is called at init
+    // Or, move this initialization block into a DOMContentLoaded listener.
+    // For now, assuming BITS is either global from your engine, or you've uncommented it above.
+    const saved = localStorage.getItem("xzaviorSavedGame");
+    if (saved) {
+      game.load(saved); // Your custom engine's load method
+    } else {
+      game.reset(); // Initialize a new game if no saved game
+    }
+    renderBoard();
+  </script>
+</body>
+</html>
