@@ -1,0 +1,17 @@
+<!DOCTYPE html><html><head><title>Index</title><link rel='stylesheet' href='css/bootstrap.min.css'></head><body>
+<div class='container'><h2>Welcome to Xzavior Chess</h2>
+<select id="gameMode"><option value="computer">Vs Computer</option><option value="human">Vs Player</option></select>
+<select id="playerSide"><option value="white">White</option><option value="black">Black</option></select>
+<select id="difficulty"><option value="1">Easy</option><option value="2">Medium</option><option value="3">Hard</option><option value="4">Grandmaster</option></select>
+<button onclick="startGame()">Start Game</button>
+<script>
+function startGame() {
+  const settings = {
+    mode: document.getElementById('gameMode').value,
+    side: document.getElementById('playerSide').value,
+    difficulty: document.getElementById('difficulty').value
+  };
+  localStorage.setItem("xzaviorGameSettings", JSON.stringify(settings));
+  window.location.href = "game.html";
+}
+</script></div></body></html>
