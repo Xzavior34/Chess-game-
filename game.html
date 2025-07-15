@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xzavior Chess - Game</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -16,8 +17,8 @@
     #chessboard {
       display: grid;
       grid-template-columns: repeat(8, 1fr);
-      width: 100%;
-      max-width: 95vmin;
+      width: 95vmin;
+      height: 95vmin; /* Fallback height */
       aspect-ratio: 1 / 1;
       margin: 0 auto;
       border: 2px solid #333;
@@ -47,150 +48,152 @@
     <button class="btn btn-danger" onclick="restartGame()">Restart</button>
   </div>
 
-  <!-- FIXED: Use working chess.js version -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js"></script>
+  <!-- Using chess.js from a reliable CDN -->
+  <script src="https://unpkg.com/chess.js@0.13.4/chess.min.js"></script>
 
   <script>
-    const config = JSON.parse(localStorage.getItem("xzaviorGameSettings") || '{}');
-    const game = new Chess();
-    const board = document.getElementById("chessboard");
-    const status = document.getElementById("status");
+    document.addEventListener("DOMContentLoaded", () => {
+      const config = JSON.parse(localStorage.getItem("xzaviorGameSettings") || '{}');
+      const game = new Chess();
+      const board = document.getElementById("chessboard");
+      const status = document.getElementById("status");
 
-    let selected = null;
-    let lastMoveTime = 0;
-    let moveHistory = [];
+      let selected = null;
+      let lastMoveTime = 0;
+      let moveHistory = [];
 
-    let playerColor = config.side || "white";
-    let gameMode = config.mode || "human";
-    let difficulty = parseInt(config.difficulty || 1);
+      let playerColor = config.side || "white";
+      let gameMode = config.mode || "human";
+      let difficulty = parseInt(config.difficulty || 1);
 
-    function renderBoard() {
-      board.innerHTML = "";
-      const position = game.fen().split(" ")[0];
-      const rows = position.split("/");
-      rows.forEach((row, rIdx) => {
-        let col = 0;
-        for (const char of row) {
-          const isNum = !isNaN(char);
-          const count = isNum ? parseInt(char) : 1;
-          for (let i = 0; i < count; i++) {
-            const square = document.createElement("div");
-            const file = "abcdefgh"[col];
-            const rank = 8 - rIdx;
-            const id = `${file}${rank}`;
-            square.id = id;
-            square.className = `square ${(rIdx + col) % 2 === 0 ? "white" : "black"}`;
-            if (!isNum && i === 0) {
-              square.textContent = pieceToChar(char);
+      function renderBoard() {
+        board.innerHTML = "";
+        const position = game.fen().split(" ")[0];
+        const rows = position.split("/");
+        rows.forEach((row, rIdx) => {
+          let col = 0;
+          for (const char of row) {
+            const isNum = !isNaN(char);
+            const count = isNum ? parseInt(char) : 1;
+            for (let i = 0; i < count; i++) {
+              const square = document.createElement("div");
+              const file = "abcdefgh"[col];
+              const rank = 8 - rIdx;
+              const id = `${file}${rank}`;
+              square.id = id;
+              square.className = `square ${(rIdx + col) % 2 === 0 ? "white" : "black"}`;
+              if (!isNum && i === 0) {
+                square.textContent = pieceToChar(char);
+              }
+              square.onclick = () => onClickSquare(id);
+              board.appendChild(square);
+              col++;
             }
-            square.onclick = () => onClickSquare(id);
-            board.appendChild(square);
-            col++;
           }
-        }
-      });
-      updateStatus();
-    }
+        });
+        updateStatus();
+      }
 
-    function pieceToChar(piece) {
-      const symbols = {
-        p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
-        P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔"
-      };
-      return symbols[piece] || piece;
-    }
+      function pieceToChar(piece) {
+        const symbols = {
+          p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
+          P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔"
+        };
+        return symbols[piece] || piece;
+      }
 
-    function onClickSquare(square) {
-      if (game.game_over()) return;
-      if (selected) {
-        const move = game.move({ from: selected, to: square, promotion: 'q' });
-        if (move) {
-          moveHistory.push(game.fen());
-          selected = null;
-          renderBoard();
-          if (gameMode === "computer") {
-            setTimeout(makeComputerMove, 400);
+      function onClickSquare(square) {
+        if (game.game_over()) return;
+        if (selected) {
+          const move = game.move({ from: selected, to: square, promotion: 'q' });
+          if (move) {
+            moveHistory.push(game.fen());
+            selected = null;
+            renderBoard();
+            if (gameMode === "computer") {
+              setTimeout(makeComputerMove, 400);
+            }
+          } else {
+            selected = null;
+            renderBoard();
           }
         } else {
-          selected = null;
+          const piece = game.get(square);
+          if (piece && piece.color === game.turn()) {
+            selected = square;
+            highlightMoves(square);
+          }
+        }
+      }
+
+      function highlightMoves(square) {
+        renderBoard();
+        const moves = game.moves({ square, verbose: true });
+        document.getElementById(square).classList.add("selected");
+        moves.forEach(m => {
+          const target = document.getElementById(m.to);
+          if (target) target.classList.add("highlight");
+        });
+      }
+
+      function updateStatus() {
+        if (game.in_checkmate()) {
+          status.textContent = `Checkmate! ${game.turn() === "w" ? "Black" : "White"} wins.`;
+        } else if (game.in_check()) {
+          status.textContent = `${game.turn() === "w" ? "White" : "Black"} is in check.`;
+        } else if (game.in_draw()) {
+          status.textContent = "Draw!";
+        } else {
+          status.textContent = `${game.turn() === "w" ? "White" : "Black"}'s turn.`;
+        }
+      }
+
+      window.undoMove = function () {
+        const now = Date.now();
+        if (now - lastMoveTime < 1000) return;
+        game.undo(); game.undo();
+        renderBoard();
+        lastMoveTime = now;
+      }
+
+      window.saveGame = function () {
+        localStorage.setItem("xzaviorSavedGame", game.fen());
+        alert("Game saved!");
+      }
+
+      window.restartGame = function () {
+        if (confirm("Restart the game?")) {
+          game.reset();
+          moveHistory = [];
           renderBoard();
         }
-      } else {
-        const piece = game.get(square);
-        if (piece && piece.color === game.turn()) {
-          selected = square;
-          highlightMoves(square);
+      }
+
+      function makeComputerMove() {
+        if (game.game_over()) return;
+        const moves = game.moves();
+        let move;
+        if (difficulty === 1) {
+          move = moves[Math.floor(Math.random() * moves.length)];
+        } else {
+          move = findBestMove(); // Add smarter logic if needed
         }
-      }
-    }
-
-    function highlightMoves(square) {
-      renderBoard();
-      const moves = game.moves({ square, verbose: true });
-      document.getElementById(square).classList.add("selected");
-      moves.forEach(m => {
-        const target = document.getElementById(m.to);
-        if (target) target.classList.add("highlight");
-      });
-    }
-
-    function updateStatus() {
-      if (game.in_checkmate()) {
-        status.textContent = `Checkmate! ${game.turn() === "w" ? "Black" : "White"} wins.`;
-      } else if (game.in_check()) {
-        status.textContent = `${game.turn() === "w" ? "White" : "Black"} is in check.`;
-      } else if (game.in_draw()) {
-        status.textContent = "Draw!";
-      } else {
-        status.textContent = `${game.turn() === "w" ? "White" : "Black"}'s turn.`;
-      }
-    }
-
-    function undoMove() {
-      const now = Date.now();
-      if (now - lastMoveTime < 1000) return;
-      game.undo(); game.undo();
-      renderBoard();
-      lastMoveTime = now;
-    }
-
-    function saveGame() {
-      localStorage.setItem("xzaviorSavedGame", game.fen());
-      alert("Game saved!");
-    }
-
-    function restartGame() {
-      if (confirm("Restart the game?")) {
-        game.reset();
-        moveHistory = [];
+        game.move(move);
         renderBoard();
       }
-    }
 
-    function makeComputerMove() {
-      if (game.game_over()) return;
-      const moves = game.moves();
-      let move;
-      if (difficulty === 1) {
-        move = moves[Math.floor(Math.random() * moves.length)];
-      } else {
-        move = findBestMove(); // Future: smarter logic
+      function findBestMove() {
+        const moves = game.moves({ verbose: true });
+        if (difficulty === 2) {
+          return moves.find(m => m.captured) || moves[0];
+        }
+        return moves[Math.floor(Math.random() * moves.length)];
       }
-      game.move(move);
+
+      const saved = localStorage.getItem("xzaviorSavedGame");
+      if (saved) game.load(saved);
       renderBoard();
-    }
-
-    function findBestMove() {
-      const moves = game.moves({ verbose: true });
-      if (difficulty === 2) {
-        return moves.find(m => m.captured) || moves[0];
-      }
-      return moves[Math.floor(Math.random() * moves.length)];
-    }
-
-    const saved = localStorage.getItem("xzaviorSavedGame");
-    if (saved) game.load(saved);
-    renderBoard();
+    });
   </script>
 </body>
 </html>
