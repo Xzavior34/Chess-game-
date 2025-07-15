@@ -9,16 +9,17 @@
     body {
       font-family: 'Segoe UI', sans-serif;
       background-color: #f7f7f7;
-      margin: 0;
       text-align: center;
       padding: 20px;
+      margin: 0;
     }
     #chessboard {
       display: grid;
       grid-template-columns: repeat(8, 1fr);
       width: 95vmin;
+      max-width: 500px;
       height: 95vmin;
-      aspect-ratio: 1 / 1;
+      max-height: 500px;
       margin: 0 auto;
       border: 2px solid #333;
     }
@@ -26,9 +27,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: calc(6vmin);
+      font-size: 4vmin;
       user-select: none;
-      transition: all 0.2s ease;
     }
     .white { background: #f0d9b5; }
     .black { background: #b58863; }
@@ -38,7 +38,7 @@
   </style>
 </head>
 <body>
-  <h2 class="mb-3">Xzavior Chess</h2>
+  <h2>Xzavior Chess</h2>
   <div id="chessboard"></div>
   <div id="status">Loading...</div>
   <div class="mt-3">
@@ -47,164 +47,143 @@
     <button class="btn btn-danger" onclick="restartGame()">Restart</button>
   </div>
 
-  <!-- Use CDN for chess.js -->
+  <!-- Use chess.js from CDN -->
   <script src="https://unpkg.com/chess.js@0.13.4/chess.min.js"></script>
 
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const config = JSON.parse(localStorage.getItem("xzaviorGameSettings") || '{}');
-      const game = new Chess();
-      const board = document.getElementById("chessboard");
-      const status = document.getElementById("status");
+    const config = JSON.parse(localStorage.getItem("xzaviorGameSettings") || '{}');
+    const game = new Chess();
+    const board = document.getElementById("chessboard");
+    const status = document.getElementById("status");
 
-      let selected = null;
-      let lastMoveTime = 0;
+    let selected = null;
+    let playerColor = config.side || "white";
+    let gameMode = config.mode || "human";
+    let difficulty = parseInt(config.difficulty || 1);
 
-      const playerColor = config.side || "white";
-      const gameMode = config.mode || "human";
-      const difficulty = parseInt(config.difficulty || 1);
+    function pieceToSymbol(piece) {
+      const map = {
+        p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
+        P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔"
+      };
+      return map[piece] || "";
+    }
 
-      function renderBoard() {
-        board.innerHTML = "";
-        const position = game.fen().split(" ")[0];
-        const rows = position.split("/");
-        rows.forEach((row, rIdx) => {
-          let col = 0;
-          for (const char of row) {
-            const isNum = !isNaN(char);
-            const count = isNum ? parseInt(char) : 1;
-            for (let i = 0; i < count; i++) {
-              const square = document.createElement("div");
-              const file = "abcdefgh"[col];
-              const rank = 8 - rIdx;
-              const id = `${file}${rank}`;
-              square.id = id;
-              square.className = `square ${(rIdx + col) % 2 === 0 ? "white" : "black"}`;
-              if (!isNum && i === 0) {
-                square.textContent = pieceToChar(char);
-              }
-              square.onclick = () => onClickSquare(id);
-              board.appendChild(square);
-              col++;
+    function renderBoard() {
+      board.innerHTML = "";
+      const position = game.fen().split(" ")[0];
+      const rows = position.split("/");
+      rows.forEach((row, r) => {
+        let fileIndex = 0;
+        for (let ch of row) {
+          const isNum = !isNaN(ch);
+          const count = isNum ? parseInt(ch) : 1;
+          for (let i = 0; i < count; i++) {
+            const square = document.createElement("div");
+            const rank = 8 - r;
+            const file = "abcdefgh"[fileIndex];
+            const squareId = `${file}${rank}`;
+            square.id = squareId;
+            square.className = `square ${(r + fileIndex) % 2 === 0 ? "white" : "black"}`;
+
+            if (!isNum && i === 0) {
+              square.textContent = pieceToSymbol(ch);
             }
-          }
-        });
-        updateStatus();
-      }
 
-      function pieceToChar(piece) {
-        const symbols = {
-          p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
-          P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔"
-        };
-        return symbols[piece] || piece;
-      }
-
-      function onClickSquare(square) {
-        if (game.game_over()) return;
-
-        if (selected) {
-          const move = game.move({ from: selected, to: square, promotion: 'q' });
-          if (move) {
-            selected = null;
-            renderBoard();
-            if (gameMode === "computer") {
-              setTimeout(makeComputerMove, 500);
-            }
-          } else {
-            selected = null;
-            renderBoard();
-          }
-        } else {
-          const piece = game.get(square);
-          if (piece && piece.color === game.turn()) {
-            selected = square;
-            highlightMoves(square);
+            square.onclick = () => handleClick(squareId);
+            board.appendChild(square);
+            fileIndex++;
           }
         }
-      }
+      });
 
-      function highlightMoves(square) {
+      updateStatus();
+    }
+
+    function updateStatus() {
+      if (game.in_checkmate()) {
+        status.textContent = `Checkmate! ${game.turn() === "w" ? "Black" : "White"} wins.`;
+      } else if (game.in_check()) {
+        status.textContent = `${game.turn() === "w" ? "White" : "Black"} is in check.`;
+      } else if (game.in_draw()) {
+        status.textContent = "Draw!";
+      } else {
+        status.textContent = `${game.turn() === "w" ? "White" : "Black"}'s turn.`;
+      }
+    }
+
+    function handleClick(square) {
+      if (game.game_over()) return;
+
+      if (selected) {
+        const move = game.move({ from: selected, to: square, promotion: 'q' });
+        selected = null;
         renderBoard();
-        const moves = game.moves({ square, verbose: true });
-        document.getElementById(square).classList.add("selected");
-        moves.forEach(m => {
-          const target = document.getElementById(m.to);
-          if (target) target.classList.add("highlight");
-        });
-      }
-
-      function updateStatus() {
-        if (game.in_checkmate()) {
-          status.textContent = `Checkmate! ${game.turn() === "w" ? "Black" : "White"} wins.`;
-        } else if (game.in_check()) {
-          status.textContent = `${game.turn() === "w" ? "White" : "Black"} is in check.`;
-        } else if (game.in_draw()) {
-          status.textContent = "Draw!";
-        } else {
-          status.textContent = `${game.turn() === "w" ? "White" : "Black"}'s turn.`;
+        if (move && gameMode === "computer") {
+          setTimeout(makeComputerMove, 500);
+        }
+      } else {
+        const piece = game.get(square);
+        if (piece && piece.color === game.turn()) {
+          selected = square;
+          highlightMoves(square);
         }
       }
+    }
 
-      window.undoMove = function () {
-        const now = Date.now();
-        if (now - lastMoveTime < 1000) return;
-        game.undo();
-        if (gameMode === "computer") game.undo();
-        renderBoard();
-        lastMoveTime = now;
-      }
-
-      window.saveGame = function () {
-        localStorage.setItem("xzaviorSavedGame", game.fen());
-        alert("Game saved!");
-      }
-
-      window.restartGame = function () {
-        if (confirm("Restart the game?")) {
-          game.reset();
-          renderBoard();
-        }
-      }
-
-      function makeComputerMove() {
-        if (game.game_over()) return;
-        const moves = game.moves();
-        let move = null;
-
-        if (difficulty === 1) {
-          move = moves[Math.floor(Math.random() * moves.length)];
-        } else {
-          move = findBestMove();
-        }
-
-        if (move) {
-          game.move(move);
-          renderBoard();
-        }
-      }
-
-      function findBestMove() {
-        const moves = game.moves({ verbose: true });
-        return moves.find(m => m.captured) || moves[Math.floor(Math.random() * moves.length)];
-      }
-
-      // Handle loading saved game
-      const saved = localStorage.getItem("xzaviorSavedGame");
-      if (saved) game.load(saved);
-
-      // Flip board if player is black
-      if (playerColor === "black") {
-        board.style.transform = "rotate(180deg)";
-      }
-
+    function highlightMoves(square) {
       renderBoard();
+      const moves = game.moves({ square, verbose: true });
+      document.getElementById(square).classList.add("selected");
+      moves.forEach(m => {
+        const sq = document.getElementById(m.to);
+        if (sq) sq.classList.add("highlight");
+      });
+    }
 
-      // If user picked black vs computer, let computer play first
-      if (playerColor === "black" && gameMode === "computer" && game.turn() === "w") {
-        setTimeout(makeComputerMove, 500);
+    function makeComputerMove() {
+      if (game.game_over()) return;
+      const moves = game.moves();
+      const move = difficulty === 1
+        ? moves[Math.floor(Math.random() * moves.length)]
+        : moves.find(m => m.includes("x")) || moves[0];
+      game.move(move);
+      renderBoard();
+    }
+
+    function undoMove() {
+      game.undo();
+      if (gameMode === "computer") game.undo();
+      renderBoard();
+    }
+
+    function saveGame() {
+      localStorage.setItem("xzaviorSavedGame", game.fen());
+      alert("Game saved!");
+    }
+
+    function restartGame() {
+      if (confirm("Restart game?")) {
+        game.reset();
+        renderBoard();
       }
-    });
+    }
+
+    // Load saved game if any
+    const saved = localStorage.getItem("xzaviorSavedGame");
+    if (saved) game.load(saved);
+
+    // Flip board if user chose black
+    if (playerColor === "black") {
+      board.style.transform = "rotate(180deg)";
+    }
+
+    renderBoard();
+
+    // Let computer play first if user picked black
+    if (playerColor === "black" && gameMode === "computer" && game.turn() === "w") {
+      setTimeout(makeComputerMove, 500);
+    }
   </script>
 </body>
 </html>
